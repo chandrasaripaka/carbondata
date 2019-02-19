@@ -426,6 +426,8 @@ public final class CarbonCommonConstants {
    */
   public static final String DICTIONARY_PATH = "dictionary_path";
   public static final String SORT_COLUMNS = "sort_columns";
+  public static final String SORT_SCOPE = "sort_scope";
+  public static final String RANGE_COLUMN = "range_column";
   public static final String PARTITION_TYPE = "partition_type";
   public static final String NUM_PARTITIONS = "num_partitions";
   public static final String RANGE_INFO = "range_info";
@@ -960,7 +962,7 @@ public final class CarbonCommonConstants {
    * If set to GLOBAL_SORT, the sorting scope is bigger and one index tree per task will be
    * created, thus loading is slower but query is faster.
    */
-  public static final String LOAD_SORT_SCOPE_DEFAULT = "LOCAL_SORT";
+  public static final String LOAD_SORT_SCOPE_DEFAULT = "NO_SORT";
 
   /**
    * Size of batch data to keep in memory, as a thumb rule it supposed
@@ -1122,7 +1124,7 @@ public final class CarbonCommonConstants {
   public static final int CARBON_SORT_STORAGE_INMEMORY_IN_MB_DEFAULT = 512;
 
   /*
-   * whether to enable prefetch for rowbatch to enhance row reconstruction during compaction
+   * whether to enable prefetch for rowBatch to enhance row reconstruction during compaction
    */
   @CarbonProperty
   public static final String CARBON_COMPACTION_PREFETCH_ENABLE =
@@ -1176,6 +1178,16 @@ public final class CarbonCommonConstants {
    */
   public static final int SORT_SIZE_MIN_VAL = 1000;
 
+  /**
+   * For Range_Column, it will use SCALE_FACTOR to control the size of each partition.
+   * When SCALE_FACTOR is the compression ratio of carbonData,
+   * each task will generate one CarbonData file.
+   * And the size of this CarbonData file is about TABLE_BLOCKSIZE of this table.
+   */
+  public static final String CARBON_RANGE_COLUMN_SCALE_FACTOR = "carbon.range.column.scale.factor";
+
+  public static final String CARBON_RANGE_COLUMN_SCALE_FACTOR_DEFAULT = "3";
+
   //////////////////////////////////////////////////////////////////////////////////////////
   // Query parameter start here
   //////////////////////////////////////////////////////////////////////////////////////////
@@ -1215,6 +1227,16 @@ public final class CarbonCommonConstants {
   public static final String DETAIL_QUERY_BATCH_SIZE = "carbon.detail.batch.size";
 
   public static final int DETAIL_QUERY_BATCH_SIZE_DEFAULT = 100;
+
+  /**
+   * Maximum batch size of carbon.detail.batch.size property
+   */
+  public static final int DETAIL_QUERY_BATCH_SIZE_MAX = 1000;
+
+  /**
+   * Minimum batch size of carbon.detail.batch.size property
+   */
+  public static final int DETAIL_QUERY_BATCH_SIZE_MIN = 100;
 
   /**
    * max driver lru cache size upto which lru cache will be loaded in memory
@@ -1365,6 +1387,13 @@ public final class CarbonCommonConstants {
   public static final int CARBON_DYNAMIC_ALLOCATION_SCHEDULER_THREAD_SLEEP_TIME = 250;
 
   /**
+   * We increment the requested page size by 30% only if the requested size is less than 10MB.
+   * Otherwise we take the original requested page size.This parameter will be used till the
+   * size based page implementation comes in carbon.
+   */
+  public static final int REQUESTED_PAGE_SIZE_MAX = 10485760;
+
+  /**
    * It allows queries on hive metastore directly along with filter information, otherwise first
    * fetches all partitions from hive and apply filters on it.
    */
@@ -1448,12 +1477,6 @@ public final class CarbonCommonConstants {
       "carbon.query.directQueryOnDataMap.enabled";
 
   public static final String SUPPORT_DIRECT_QUERY_ON_DATAMAP_DEFAULTVALUE = "false";
-
-  @CarbonProperty
-  public static final String VALIDATE_DIRECT_QUERY_ON_DATAMAP =
-      "carbon.query.validate.direct.query.on.datamap";
-
-  public static final String VALIDATE_DIRECT_QUERY_ON_DATAMAP_DEFAULTVALUE = "true";
 
   @CarbonProperty
   public static final String CARBON_SHOW_DATAMAPS = "carbon.query.show.datamaps";
@@ -1809,6 +1832,11 @@ public final class CarbonCommonConstants {
    * S3LOCK TYPE
    */
   public static final String CARBON_LOCK_TYPE_S3 = "S3LOCK";
+
+  /**
+   * ALLUXIOLOCK TYPE
+   */
+  public static final String CARBON_LOCK_TYPE_ALLUXIO = "ALLUXIOLOCK";
 
   /**
    * Invalid filter member log string

@@ -441,7 +441,6 @@ public class SortParameters implements Serializable {
 
     parameters.setTempFileLocation(sortTempDirs);
     LOGGER.info("temp file location: " + StringUtils.join(parameters.getTempFileLocation(), ","));
-
     int numberOfCores = 1;
     // In case of loading from partition we should use the cores specified by it
     if (configuration.getWritingCoresCount() > 0) {
@@ -495,11 +494,11 @@ public class SortParameters implements Serializable {
     parameters.setCarbonTable(carbonTable);
     parameters.setDatabaseName(databaseName);
     parameters.setTableName(tableName);
-    parameters.setPartitionID(CarbonTablePath.DEPRECATED_PATITION_ID);
+    parameters.setPartitionID(CarbonTablePath.DEPRECATED_PARTITION_ID);
     parameters.setSegmentId(segmentId);
     parameters.setTaskNo(taskNo);
     parameters.setMeasureColCount(measureColCount);
-    parameters.setDimColCount(dimColCount - complexDimColCount);
+    parameters.setDimColCount(dimColCount);
     parameters.setNumberOfSortColumns(carbonTable.getNumberOfSortColumns());
     parameters.setNoDictionaryCount(noDictionaryCount);
     parameters.setNumberOfNoDictSortColumns(carbonTable.getNumberOfNoDictSortColumns());

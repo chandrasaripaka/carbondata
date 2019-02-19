@@ -20,6 +20,7 @@ import org.apache.spark.sql.test.TestQueryExecutor
 import org.scalatest.{BeforeAndAfterAll, Suites}
 
 import org.apache.carbondata.cluster.sdv.generated._
+import org.apache.carbondata.cluster.sdv.generated.datasource.{CreateTableUsingSparkCarbonFileFormatTestCase, SparkCarbonDataSourceTestCase}
 import org.apache.carbondata.cluster.sdv.register.TestRegisterCarbonTable
 import org.apache.carbondata.spark.testsuite.localdictionary.LoadTableWithLocalDictionaryTestCase
 
@@ -174,7 +175,25 @@ class SDVSuites3 extends Suites with BeforeAndAfterAll {
  */
 class SDVSuites4 extends Suites with BeforeAndAfterAll {
 
-  val suites =     new CarbonV1toV3CompatabilityTestCase :: Nil
+  val suites =     new CreateTableUsingSparkCarbonFileFormatTestCase ::
+                   new SparkCarbonDataSourceTestCase ::
+                   new CarbonV1toV3CompatabilityTestCase :: Nil
+
+  override val nestedSuites = suites.toIndexedSeq
+
+  override protected def afterAll() = {
+    println("---------------- Stopping spark -----------------")
+    TestQueryExecutor.INSTANCE.stop()
+    println("---------------- Stopped spark -----------------")
+  }
+}
+
+/**
+ * Suite class for presto tests
+ */
+class SDVSuites5 extends Suites with BeforeAndAfterAll {
+
+  val suites =  new PrestoSampleTestCase :: Nil
 
   override val nestedSuites = suites.toIndexedSeq
 

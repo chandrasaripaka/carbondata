@@ -56,6 +56,10 @@ import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_
 import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_TASK_DISTRIBUTION_MERGE_FILES;
 import static org.apache.carbondata.core.constants.CarbonCommonConstants.CARBON_TIMESTAMP_FORMAT;
 import static org.apache.carbondata.core.constants.CarbonCommonConstants.CSV_READ_BUFFER_SIZE;
+import static org.apache.carbondata.core.constants.CarbonCommonConstants.DETAIL_QUERY_BATCH_SIZE;
+import static org.apache.carbondata.core.constants.CarbonCommonConstants.DETAIL_QUERY_BATCH_SIZE_DEFAULT;
+import static org.apache.carbondata.core.constants.CarbonCommonConstants.DETAIL_QUERY_BATCH_SIZE_MAX;
+import static org.apache.carbondata.core.constants.CarbonCommonConstants.DETAIL_QUERY_BATCH_SIZE_MIN;
 import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_AUTO_HANDOFF;
 import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_OFFHEAP_SORT;
 import static org.apache.carbondata.core.constants.CarbonCommonConstants.ENABLE_UNSAFE_SORT;
@@ -84,7 +88,7 @@ public final class CarbonProperties {
   private static final CarbonProperties CARBONPROPERTIESINSTANCE = new CarbonProperties();
 
   /**
-   * porpeties .
+   * Properties
    */
   private Properties carbonProperties;
 
@@ -192,6 +196,9 @@ public final class CarbonProperties {
       case CARBON_MINMAX_ALLOWED_BYTE_COUNT:
         validateStringCharacterLimit();
         break;
+      case DETAIL_QUERY_BATCH_SIZE:
+        validateDetailQueryBatchSize();
+        break;
       // TODO : Validation for carbon.lock.type should be handled for addProperty flow
       default:
         // none
@@ -256,6 +263,7 @@ public final class CarbonProperties {
     validateEnableQueryStatistics();
     validateSortMemorySpillPercentage();
     validateStringCharacterLimit();
+    validateDetailQueryBatchSize();
   }
 
   /**
@@ -597,9 +605,9 @@ public final class CarbonProperties {
         .getProperty(NUMBER_OF_COLUMN_TO_READ_IN_IO,
             CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULTVALUE);
     try {
-      short numberofColumnPerIO = Short.parseShort(numberOfColumnPerIOString);
-      if (numberofColumnPerIO < CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_MIN
-          || numberofColumnPerIO > CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_MAX) {
+      short numberOfColumnPerIO = Short.parseShort(numberOfColumnPerIOString);
+      if (numberOfColumnPerIO < CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_MIN
+          || numberOfColumnPerIO > CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_MAX) {
         LOGGER.info("The Number Of pages per blocklet column value \"" + numberOfColumnPerIOString
             + "\" is invalid. Using the default value \""
             + CarbonV3DataFormatConstants.NUMBER_OF_COLUMN_TO_READ_IN_IO_DEFAULTVALUE);
@@ -1364,6 +1372,30 @@ public final class CarbonProperties {
     return thresholdSize;
   }
 
+  public int getRangeColumnScaleFactor() {
+    boolean isValid = true;
+    int scaleFactor = 1;
+    try {
+      scaleFactor = Integer.parseInt(CarbonProperties.getInstance().getProperty(
+          CarbonCommonConstants.CARBON_RANGE_COLUMN_SCALE_FACTOR,
+          CarbonCommonConstants.CARBON_RANGE_COLUMN_SCALE_FACTOR_DEFAULT));
+      if (scaleFactor < 1 || scaleFactor > 300) {
+        isValid = false;
+      }
+    } catch (NumberFormatException ex) {
+      LOGGER.warn("Range column scala factor isn't number format");
+      isValid = false;
+    }
+
+    if (isValid) {
+      return scaleFactor;
+    } else {
+      LOGGER.warn("The scale factor is invalid. Using the default value "
+          + CarbonCommonConstants.CARBON_RANGE_COLUMN_SCALE_FACTOR_DEFAULT);
+      return Integer.parseInt(CarbonCommonConstants.CARBON_RANGE_COLUMN_SCALE_FACTOR_DEFAULT);
+    }
+  }
+
   /**
    * Get the number of hours the segment lock files will be preserved.
    * It will be converted to microseconds to return.
@@ -1523,5 +1555,34 @@ public final class CarbonProperties {
     }
   }
 
-
+  /**
+   * This method validates the DETAIL_QUERY_BATCH_SIZE. If some invalid input is set, we use the
+   * default value for this property
+   */
+  private void validateDetailQueryBatchSize() {
+    String batchSizeString =
+        carbonProperties.getProperty(DETAIL_QUERY_BATCH_SIZE);
+    if (batchSizeString == null) {
+      carbonProperties.setProperty(DETAIL_QUERY_BATCH_SIZE,
+          Integer.toString(DETAIL_QUERY_BATCH_SIZE_DEFAULT));
+      LOGGER.info(
+          "Using default value for carbon.detail.batch.size " + DETAIL_QUERY_BATCH_SIZE_DEFAULT);
+    } else {
+      int batchSize;
+      try {
+        batchSize = Integer.parseInt(batchSizeString);
+        if (batchSize < DETAIL_QUERY_BATCH_SIZE_MIN || batchSize > DETAIL_QUERY_BATCH_SIZE_MAX) {
+          LOGGER.warn("Invalid carbon.detail.batch.size.Using default value "
+              + DETAIL_QUERY_BATCH_SIZE_DEFAULT);
+          carbonProperties.setProperty(DETAIL_QUERY_BATCH_SIZE,
+              Integer.toString(DETAIL_QUERY_BATCH_SIZE_DEFAULT));
+        }
+      } catch (NumberFormatException ne) {
+        LOGGER.info("Invalid carbon.detail.batch.size.Using default value "
+            + DETAIL_QUERY_BATCH_SIZE_DEFAULT);
+        carbonProperties.setProperty(DETAIL_QUERY_BATCH_SIZE,
+            Integer.toString(DETAIL_QUERY_BATCH_SIZE_DEFAULT));
+      }
+    }
+  }
 }

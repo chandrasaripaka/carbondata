@@ -212,6 +212,9 @@ public abstract class AbstractQueryExecutor<E> implements QueryExecutor<E> {
             .isUseMinMaxForPruning()) {
         blockInfo.setBlockOffset(blockletDetailInfo.getBlockFooterOffset());
         DataFileFooter fileFooter = filePathToFileFooterMapping.get(blockInfo.getFilePath());
+        if (null != blockInfo.getDataFileFooter()) {
+          fileFooter = blockInfo.getDataFileFooter();
+        }
         if (null == fileFooter) {
           blockInfo.setDetailInfo(null);
           fileFooter = CarbonUtil.readMetadataFile(blockInfo);
@@ -797,6 +800,7 @@ public abstract class AbstractQueryExecutor<E> implements QueryExecutor<E> {
     if (freeUnsafeMemory) {
       UnsafeMemoryManager.INSTANCE
           .freeMemoryAll(ThreadLocalTaskInfo.getCarbonTaskInfo().getTaskId());
+      ThreadLocalTaskInfo.clearCarbonTaskInfo();
     }
     if (null != queryProperties.executorService) {
       // In case of limit query when number of limit records is already found so executors
@@ -808,6 +812,7 @@ public abstract class AbstractQueryExecutor<E> implements QueryExecutor<E> {
     if (null != exceptionOccurred) {
       throw new QueryExecutionException(exceptionOccurred);
     }
+    DataTypeUtil.clearFormatter();
   }
 
 }

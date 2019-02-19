@@ -35,6 +35,7 @@ import org.apache.carbondata.core.constants.CarbonCommonConstants
 import org.apache.carbondata.core.datamap.DataMapStoreManager
 import org.apache.carbondata.core.datastore.block.SegmentPropertiesAndSchemaHolder
 import org.apache.carbondata.core.datastore.impl.FileFactory
+import org.apache.carbondata.core.exception.InvalidConfigurationException
 import org.apache.carbondata.core.locks.{CarbonLockUtil, ICarbonLock, LockUsage}
 import org.apache.carbondata.core.metadata.{AbsoluteTableIdentifier, CarbonTableIdentifier}
 import org.apache.carbondata.core.metadata.converter.ThriftWrapperSchemaConverterImpl
@@ -107,13 +108,8 @@ object AlterTableUtil {
    */
   def updateSchemaInfo(carbonTable: CarbonTable,
       schemaEvolutionEntry: SchemaEvolutionEntry = null,
-      thriftTable: TableInfo,
-      cols: Option[Seq[org.apache.carbondata.core.metadata.schema.table.column.ColumnSchema]] =
-      None)
-    (sparkSession: SparkSession):
-    (TableIdentifier,
-      String,
-      Option[Seq[org.apache.carbondata.core.metadata.schema.table.column.ColumnSchema]]) = {
+      thriftTable: TableInfo)
+    (sparkSession: SparkSession): (TableIdentifier, String) = {
     val dbName = carbonTable.getDatabaseName
     val tableName = carbonTable.getTableName
     CarbonEnv.getInstance(sparkSession).carbonMetaStore
@@ -127,7 +123,7 @@ object AlterTableUtil {
     val schema = CarbonEnv.getInstance(sparkSession).carbonMetaStore
       .lookupRelation(tableIdentifier)(sparkSession).schema.json
     val schemaParts = prepareSchemaJsonForAlterTable(sparkSession.sparkContext.getConf, schema)
-    (tableIdentifier, schemaParts, cols)
+    (tableIdentifier, schemaParts)
   }
 
   /**
@@ -249,11 +245,11 @@ object AlterTableUtil {
    * @param timeStamp
    * @param sparkSession
    */
-  def revertDataTypeChanges(dbName: String, tableName: String, timeStamp: Long)
+  def revertColumnRenameAndDataTypeChanges(dbName: String, tableName: String, timeStamp: Long)
     (sparkSession: SparkSession): Unit = {
-    val metastore = CarbonEnv.getInstance(sparkSession).carbonMetaStore
+    val metaStore = CarbonEnv.getInstance(sparkSession).carbonMetaStore
     val carbonTable = CarbonEnv.getCarbonTable(Some(dbName), tableName)(sparkSession)
-    val thriftTable: TableInfo = metastore.getThriftTableInfo(carbonTable)
+    val thriftTable: TableInfo = metaStore.getThriftTableInfo(carbonTable)
     val evolutionEntryList = thriftTable.fact_table.schema_evolution.schema_evolution_history
     val updatedTime = evolutionEntryList.get(evolutionEntryList.size() - 1).time_stamp
     if (updatedTime == timeStamp) {
@@ -269,10 +265,49 @@ object AlterTableUtil {
           }
         }
       }
-      metastore
+      metaStore
         .revertTableSchemaInAlterFailure(carbonTable.getCarbonTableIdentifier,
           thriftTable, carbonTable.getAbsoluteTableIdentifier)(sparkSession)
     }
+  }
+
+  /**
+   * This method modifies the table properties if column rename happened
+   * @param tableProperties tableProperties of the table
+   * @param oldColumnName old COlumnname before rename
+   * @param newColumnName new column name to rename
+   */
+  def modifyTablePropertiesAfterColumnRename(
+      tableProperties: mutable.Map[String, String],
+      oldColumnName: String,
+      newColumnName: String): Unit = {
+    tableProperties.foreach { tableProperty =>
+      if (tableProperty._2.contains(oldColumnName)) {
+        val tablePropertyKey = tableProperty._1
+        val tablePropertyValue = tableProperty._2
+        tableProperties
+          .put(tablePropertyKey, tablePropertyValue.replace(oldColumnName, newColumnName))
+      }
+    }
+  }
+
+  /**
+   * This method create a new SchemaEvolutionEntry and adds to SchemaEvolutionEntry List
+   *
+   * @param schemaEvolutionEntry List to add new SchemaEvolutionEntry
+   * @param addColumnSchema          added new column schema
+   * @param deletedColumnSchema      old column schema which is deleted
+   * @return
+   */
+  def addNewSchemaEvolutionEntry(
+      schemaEvolutionEntry: SchemaEvolutionEntry,
+      timeStamp: Long,
+      addColumnSchema: org.apache.carbondata.format.ColumnSchema,
+      deletedColumnSchema: org.apache.carbondata.format.ColumnSchema): SchemaEvolutionEntry = {
+    var schemaEvolutionEntry = new SchemaEvolutionEntry(timeStamp)
+    schemaEvolutionEntry.setAdded(List(addColumnSchema).asJava)
+    schemaEvolutionEntry.setRemoved(List(deletedColumnSchema).asJava)
+    schemaEvolutionEntry
   }
 
   /**
@@ -323,6 +358,12 @@ object AlterTableUtil {
       // validate the load min size properties
       validateLoadMinSizeProperties(carbonTable, lowerCasePropertiesMap)
 
+      // validate the range column properties
+      validateRangeColumnProperties(carbonTable, lowerCasePropertiesMap)
+
+      // validate the Sort Scope
+      validateSortScopeProperty(carbonTable, lowerCasePropertiesMap)
+
       // below map will be used for cache invalidation. As tblProperties map is getting modified
       // in the next few steps the original map need to be retained for any decision making
       val existingTablePropertiesMap = mutable.Map(tblPropertiesMap.toSeq: _*)
@@ -350,11 +391,14 @@ object AlterTableUtil {
             // older tables. So no need to remove from table properties map for unset just to ensure
             // for older table behavior. So in case of unset, if enable property is already present
             // in map, then just set it to default value of local dictionary which is true.
-            if (!propKey.equalsIgnoreCase(CarbonCommonConstants.LOCAL_DICTIONARY_ENABLE)) {
-              tblPropertiesMap.remove(propKey.toLowerCase)
-            } else {
+            if (propKey.equalsIgnoreCase(CarbonCommonConstants.LOCAL_DICTIONARY_ENABLE)) {
               tblPropertiesMap
                 .put(propKey.toLowerCase, CarbonCommonConstants.LOCAL_DICTIONARY_ENABLE_DEFAULT)
+            } else if (propKey.equalsIgnoreCase("sort_scope")) {
+              tblPropertiesMap
+                .put(propKey.toLowerCase, CarbonCommonConstants.LOAD_SORT_SCOPE_DEFAULT)
+            } else {
+              tblPropertiesMap.remove(propKey.toLowerCase)
             }
           } else {
             val errorMessage = "Error: Invalid option(s): " + propKey
@@ -364,11 +408,10 @@ object AlterTableUtil {
         // check if duplicate columns are present in both local dictionary include and exclude
         CarbonScalaUtil.validateDuplicateLocalDictIncludeExcludeColmns(tblPropertiesMap)
       }
-      val (tableIdentifier, schemParts, cols: Option[Seq[org.apache.carbondata.core.metadata
-      .schema.table.column.ColumnSchema]]) = updateSchemaInfo(
+      val (tableIdentifier, schemParts) = updateSchemaInfo(
         carbonTable = carbonTable,
         thriftTable = thriftTable)(sparkSession)
-      catalog.alterTable(tableIdentifier, schemParts, cols)
+      catalog.alterTable(tableIdentifier, schemParts, None)
       sparkSession.catalog.refreshTable(tableIdentifier.quotedString)
       // check and clear the block/blocklet cache
       checkAndClearBlockletCache(carbonTable,
@@ -395,7 +438,9 @@ object AlterTableUtil {
       "LOCAL_DICTIONARY_THRESHOLD",
       "LOCAL_DICTIONARY_INCLUDE",
       "LOCAL_DICTIONARY_EXCLUDE",
-      "LOAD_MIN_SIZE_INMB")
+      "LOAD_MIN_SIZE_INMB",
+      "RANGE_COLUMN",
+      "SORT_SCOPE")
     supportedOptions.contains(propKey.toUpperCase)
   }
 
@@ -475,6 +520,42 @@ object AlterTableUtil {
       CommonUtil.validateCacheLevel(
         propertiesMap.get(CarbonCommonConstants.CACHE_LEVEL).get,
         propertiesMap)
+    }
+  }
+
+  def validateRangeColumnProperties(carbonTable: CarbonTable,
+      propertiesMap: mutable.Map[String, String]): Unit = {
+    if (propertiesMap.get(CarbonCommonConstants.RANGE_COLUMN).isDefined) {
+      val rangeColumnProp = propertiesMap.get(CarbonCommonConstants.RANGE_COLUMN).get
+      if (rangeColumnProp.contains(",")) {
+        val errorMsg = "range_column not support multiple columns"
+        throw new MalformedCarbonCommandException(errorMsg)
+      }
+      val rangeColumn = carbonTable.getColumnByName(carbonTable.getTableName, rangeColumnProp)
+      if (rangeColumn == null) {
+        throw new MalformedCarbonCommandException(
+          s"Table property ${ CarbonCommonConstants.RANGE_COLUMN }: ${ rangeColumnProp }" +
+          s" is not exists in the table")
+      } else {
+        propertiesMap.put(CarbonCommonConstants.RANGE_COLUMN, rangeColumn.getColName)
+      }
+    }
+  }
+
+  def validateSortScopeProperty(carbonTable: CarbonTable,
+      propertiesMap: mutable.Map[String, String]): Unit = {
+    propertiesMap.foreach { property =>
+      if (property._1.equalsIgnoreCase("SORT_SCOPE")) {
+        if (!CarbonUtil.isValidSortOption(property._2)) {
+          throw new MalformedCarbonCommandException(
+            s"Invalid SORT_SCOPE ${ property._2 }, valid SORT_SCOPE are 'NO_SORT', 'BATCH_SORT', " +
+            s"'LOCAL_SORT' and 'GLOBAL_SORT'")
+        } else if (!property._2.equalsIgnoreCase("NO_SORT") &&
+                   (carbonTable.getNumberOfSortColumns == 0)) {
+          throw new InvalidConfigurationException(
+            s"Cannot set SORT_SCOPE as ${ property._2 } when table has no SORT_COLUMNS")
+        }
+      }
     }
   }
 
@@ -670,9 +751,9 @@ object AlterTableUtil {
     // check if the column specified exists in table schema
     localDictColumns.foreach { distCol =>
       if (!allColumns.exists(x => x.getColumnName.equalsIgnoreCase(distCol.trim))) {
-        val errormsg = "LOCAL_DICTIONARY_INCLUDE/LOCAL_DICTIONARY_EXCLUDE column: " + distCol.trim +
+        val errorMsg = "LOCAL_DICTIONARY_INCLUDE/LOCAL_DICTIONARY_EXCLUDE column: " + distCol.trim +
                        " does not exist in table. Please check the DDL."
-        throw new MalformedCarbonCommandException(errormsg)
+        throw new MalformedCarbonCommandException(errorMsg)
       }
     }
 
